@@ -19,8 +19,7 @@ def initialize_firebase():
         try:
             # Check if running in Streamlit Cloud and secrets are available
             if "firebase_key" in st.secrets:
-                st.info("Initializing Firebase using Streamlit secrets...")
-                cred_dict = st.secrets["health-project-afff3-firebase-adminsdk-fbsvc-d4407f2099"]
+                cred_dict = st.secrets["firebase_key"]
                 cred = credentials.Certificate(cred_dict)
                 
                 # Explicitly pass the project ID from the secrets to fix the error
