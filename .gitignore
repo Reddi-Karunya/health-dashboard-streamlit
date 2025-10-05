@@ -1,2 +1,13 @@
+# Python
+__pycache__/
+*.pyc
 
+# Streamlit
+.streamlit/secrets.toml
+
+# Firebase keys
+*.json
 firebase-key.json
+
+# Environment
+.env
