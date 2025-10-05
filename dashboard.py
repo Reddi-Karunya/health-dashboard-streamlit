@@ -3,6 +3,7 @@ import pandas as pd
 import altair as alt
 from datetime import datetime
 import os
+import ast # ADDED: To safely parse the secret string
 
 # --- Firebase Imports ---
 import firebase_admin
@@ -12,22 +13,26 @@ from firebase_admin import credentials, firestore
 st.set_page_config(layout="wide", page_title="Kerala Migrant Health Dashboard")
 
 # --- Firebase Connection ---
-# FINAL CORRECTED VERSION: This function explicitly passes the project ID.
+# FINAL, ROBUST VERSION: This function now handles if the secret is read as a string.
 @st.cache_resource
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
             # Check if running in Streamlit Cloud and secrets are available
             if "firebase_key" in st.secrets:
-                cred_dict = st.secrets["firebase_key"]
+                cred_info = st.secrets["firebase_key"]
+                cred_dict = {}
+
+                # Safely convert the secret from a string to a dictionary if needed
+                if isinstance(cred_info, str):
+                    cred_dict = ast.literal_eval(cred_info)
+                else:
+                    cred_dict = dict(cred_info)
+
                 cred = credentials.Certificate(cred_dict)
-                
-                # Explicitly pass the project ID from the secrets to fix the error
-                firebase_admin.initialize_app(cred, {
-                    'projectId': cred_dict['project_id'],
-                })
+                firebase_admin.initialize_app(cred)
             else:
-                # Fallback for local development (using environment variable)
+                # Fallback for local development
                 st.info("Initializing Firebase using local credentials...")
                 cred = credentials.ApplicationDefault()
                 firebase_admin.initialize_app(cred)
@@ -99,7 +104,7 @@ else:
     db = initialize_firebase()
 
     if db:
-        with st.spinner('Loading data from Firebase... This may take a moment.'):
+        with st.spinner('Loading data from Firebase...'):
             df_patients = get_firestore_data(db)
 
         st.sidebar.title("Controls")
