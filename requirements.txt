@@ -1,4 +1,4 @@
-streamlit==1.38.0
-firebase-admin==6.5.0
-pandas==2.2.2
-altair==5.3.0
+streamlit
+pandas
+altair
+firebase-admin
