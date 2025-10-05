@@ -14,37 +14,36 @@ st.set_page_config(layout="wide", page_title="Kerala Migrant Health Dashboard")
 # --- Firebase Connection ---
 # FINAL CORRECTED VERSION: This function explicitly passes the project ID.
 @st.cache_resource
-@st.cache_resource
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
-            # Use Streamlit Cloud secrets
             if "firebase_key" in st.secrets:
                 st.info("Initializing Firebase using Streamlit secrets...")
 
-                # Load JSON string as Python dict
-                import json
-                cred_dict = json.loads(st.secrets["firebase_key"])
+                # st.secrets["firebase_key"] is already a dict
+                cred_dict = dict(st.secrets["firebase_key"])
                 cred = credentials.Certificate(cred_dict)
 
-                # Initialize Firebase explicitly with project_id
                 firebase_admin.initialize_app(cred, {
-                    'projectId': cred_dict.get('project_id'),
+                    'projectId': cred_dict.get('project_id', 'health-project-afff3'),
                 })
 
             else:
                 # Local development fallback
                 st.info("Initializing Firebase using local credentials...")
                 cred = credentials.ApplicationDefault()
-                firebase_admin.initialize_app(cred)
+                firebase_admin.initialize_app(cred, {
+                    'projectId': os.getenv("GOOGLE_CLOUD_PROJECT", "health-project-afff3")
+                })
 
             return firestore.client()
 
         except Exception as e:
-            st.error(f"Failed to initialize Firebase: {e}", icon="🔥")
+            st.error(f"🔥 Failed to initialize Firebase: {e}")
             return None
 
     return firestore.client()
+
 
             
         
