@@ -2,200 +2,181 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 from datetime import datetime
-import firebase_admin
-from firebase_admin import credentials, firestore
-import json
 import os
 
+# --- Firebase Imports ---
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+# --- Page Config (must be the first Streamlit command) ---
 st.set_page_config(layout="wide", page_title="Kerala Migrant Health Dashboard")
 
-# --- Authentication ---
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "password123"
+# --- Firebase Connection ---
+# FINAL CORRECTED VERSION: This function explicitly passes the project ID.
+@st.cache_resource
+def initialize_firebase():
+    if not firebase_admin._apps:
+        try:
+            # Check if running in Streamlit Cloud and secrets are available
+            if "firebase_key" in st.secrets:
+                st.info("Initializing Firebase using Streamlit secrets...")
+                cred_dict = st.secrets["firebase_key"]
+                cred = credentials.Certificate(cred_dict)
+                
+                # Explicitly pass the project ID from the secrets to fix the error
+                firebase_admin.initialize_app(cred, {
+                    'projectId': cred_dict['project_id'],
+                })
+            else:
+                # Fallback for local development (using environment variable)
+                st.info("Initializing Firebase using local credentials...")
+                cred = credentials.ApplicationDefault()
+                firebase_admin.initialize_app(cred)
+            
+            return firestore.client()
+            
+        except Exception as e:
+            st.error(f"Failed to initialize Firebase: {e}", icon="🔥")
+            return None
+            
+    return firestore.client()
 
+# --- Data Fetching Function ---
+@st.cache_data(ttl=60)
+def get_firestore_data(_db):
+    if _db is None:
+        return pd.DataFrame()
+
+    patients_with_visits_data = []
+    try:
+        patients_ref = _db.collection('patients')
+        for patient_doc in patients_ref.stream():
+            patient_data = patient_doc.to_dict()
+            patient_id = patient_doc.id
+            visits_ref = patient_doc.reference.collection('visits')
+            for visit_doc in visits_ref.stream():
+                visit_data = visit_doc.to_dict()
+                combined_record = {**patient_data, **visit_data, 'patient_id': patient_id, 'visit_id': visit_doc.id}
+                patients_with_visits_data.append(combined_record)
+        
+        df_patients = pd.DataFrame(patients_with_visits_data)
+        
+        if not df_patients.empty:
+            df_patients = df_patients.rename(columns={
+                'name': 'Patient Name', 'location': 'District', 'notes': 'Doctor Advice',
+                'visitDate': 'Date of Visit', 'symptoms': 'Reported Symptoms',
+                'currentVaccinationStatus': 'Vaccination Status',
+            })
+            df_patients['Date of Visit'] = pd.to_datetime(df_patients['Date of Visit'], format='%d-%m-%Y', errors='coerce')
+        
+        return df_patients
+
+    except Exception as e:
+        st.error(f"Error fetching patient data from Firestore: {e}", icon="📄")
+        return pd.DataFrame()
+
+# --- Authentication Logic ---
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    st.title("🔐 Login to the Dashboard")
-    with st.form("login_form"):
+    st.title("Login to the Dashboard")
+    ADMIN_USERNAME = "admin"
+    ADMIN_PASSWORD = "password123"
+
+    with st.form(key='login_form'):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
-        login_button = st.form_submit_button("Log In")
+        login_button = st.form_submit_button(label='Log In')
 
     if login_button:
         if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
             st.session_state.authenticated = True
-            st.success("Login successful!")
             st.rerun()
         else:
-            st.error("Invalid credentials")
-
-if st.session_state.authenticated:
-
-    # --- Firebase Initialization ---
-    @st.cache_resource
-    def init_firebase():
-        try:
-            # Read secrets from Streamlit Cloud
-            firebase_config = st.secrets["firebase"]
-            json_key = json.loads(firebase_config["service_account_key"])
-            cred = credentials.Certificate(json_key)
-            if not firebase_admin._apps:
-                firebase_admin.initialize_app(cred)
-            return firestore.client()
-        except Exception as e:
-            st.error(f"Firebase initialization failed: {e}")
-            return None
-
-    db = init_firebase()
-
-    @st.cache_data(ttl=60)
-    def get_data():
-        patients_data, doctors_data = [], []
-        try:
-            # --- Patients Collection ---
-            patients_ref = db.collection("patients")
-            for patient_doc in patients_ref.stream():
-                patient = patient_doc.to_dict()
-                patient_id = patient_doc.id
-                visits_ref = patient_doc.reference.collection("visits")
-                for visit_doc in visits_ref.stream():
-                    visit = visit_doc.to_dict()
-                    patients_data.append({
-                        **patient,
-                        **visit,
-                        "patient_id": patient_id,
-                        "visit_id": visit_doc.id
-                    })
-            df_patients = pd.DataFrame(patients_data)
-
-            # --- Doctors Collection ---
-            doctors_ref = db.collection("doctors")
-            for doc in doctors_ref.stream():
-                record = doc.to_dict()
-                record["doctor_id"] = doc.id
-                doctors_data.append(record)
-            df_doctors = pd.DataFrame(doctors_data)
-
-            return df_patients, df_doctors
-        except Exception as e:
-            st.error(f"Error fetching Firestore data: {e}")
-            return pd.DataFrame(), pd.DataFrame()
+            st.error("Invalid username or password.")
+else:
+    # --- Main Dashboard ---
+    db = initialize_firebase()
 
     if db:
-        df_patients, df_doctors = get_data()
-    else:
-        st.stop()
+        with st.spinner('Loading data from Firebase... This may take a moment.'):
+            df_patients = get_firestore_data(db)
 
-    # --- Sidebar: Logout ---
-    if st.sidebar.button("Logout"):
-        st.session_state.authenticated = False
-        st.rerun()
+        st.sidebar.title("Controls")
+        if st.sidebar.button("Logout", key="logout_button"):
+            st.session_state.authenticated = False
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.rerun()
+        
+        st.title("Kerala Migrant Health Dashboard ⚕️")
+        
+        tab1, tab2 = st.tabs(["Patients Overview", "Add Records"])
 
-    st.title("⚕️ Kerala Migrant Health Dashboard")
-    st.markdown("### Public Health Surveillance for Migrant Populations")
-
-    tab1, tab2, tab3, tab4 = st.tabs(["Patients Overview", "Doctors Overview", "Combined Analysis", "Add Records"])
-
-    # ---------------------- TAB 1: PATIENTS ----------------------
-    with tab1:
-        st.header("🧍‍♂️ Patient Overview")
-        if not df_patients.empty:
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Patients", df_patients["patient_id"].nunique())
-            col2.metric("Total Visits", len(df_patients))
-            col3.metric("Districts Covered", df_patients["location"].nunique())
-
-            st.subheader("Reported Symptoms by District")
-            symptoms_chart = alt.Chart(df_patients).mark_bar().encode(
-                x=alt.X("location:N", title="District"),
-                y=alt.Y("count():Q", title="Number of Reports"),
-                tooltip=["location", "count()"]
-            ).interactive()
-            st.altair_chart(symptoms_chart, use_container_width=True)
-
-            st.subheader("Full Patient Visits Data")
-            st.dataframe(df_patients, use_container_width=True)
-        else:
-            st.info("No patient data found.")
-
-    # ---------------------- TAB 2: DOCTORS ----------------------
-    with tab2:
-        st.header("👩‍⚕️ Doctors Overview")
-        if not df_doctors.empty:
-            st.metric("Total Doctors", len(df_doctors))
-            st.metric("Unique Specialties", df_doctors["Specialty"].nunique() if "Specialty" in df_doctors.columns else 0)
-
-            st.subheader("Doctor Specialty Distribution")
-            if "Specialty" in df_doctors.columns:
-                chart = alt.Chart(df_doctors).mark_bar().encode(
-                    x="Specialty:N", y="count():Q", tooltip=["Specialty", "count()"]
+        with tab1:
+            st.header("Migrant Patient Visits")
+            if not df_patients.empty:
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Patients", df_patients['patient_id'].nunique())
+                col2.metric("Total Visits", len(df_patients))
+                col3.metric("Districts Covered", df_patients['District'].nunique())
+                
+                st.subheader("Reported Symptoms by District")
+                symptoms_by_district = df_patients.groupby('District')['Reported Symptoms'].count().reset_index()
+                symptoms_chart = alt.Chart(symptoms_by_district).mark_bar().encode(
+                    x=alt.X('District', sort=None, axis=alt.Axis(labelAngle=-45)),
+                    y='Reported Symptoms',
+                    tooltip=['District', 'Reported Symptoms']
                 ).interactive()
-                st.altair_chart(chart, use_container_width=True)
+                st.altair_chart(symptoms_chart, use_container_width=True)
+                
+                st.subheader("All Patient Visits")
+                st.dataframe(df_patients, use_container_width=True)
+            else:
+                st.warning("No patient data found or failed to load.")
 
-            st.subheader("Full Doctor Records")
-            st.dataframe(df_doctors, use_container_width=True)
-        else:
-            st.info("No doctor records found.")
+        with tab2:
+            st.header("Add New Records")
+            st.subheader("➕ Add New Patient and Visit")
+            with st.form(key='new_patient_form', clear_on_submit=True):
+                new_patient_id = st.text_input("Unique Patient ID (e.g., KL-123)")
+                new_name = st.text_input("Patient Name")
+                new_date = st.text_input("Date of Visit (dd-mm-yyyy)")
+                new_symptoms = st.text_area("Reported Symptoms")
+                new_notes = st.text_area("Doctor Advice")
+                new_district = st.selectbox("District", options=['Alappuzha', 'Ernakulam', 'Idukki', 'Kannur', 'Kasaragod', 'Kollam', 'Kottayam', 'Kozhikode', 'Malappuram', 'Palakkad', 'Pathanamthitta', 'Thiruvananthapuram', 'Thrissur', 'Wayanad'])
+                new_vaccination_status = st.selectbox("Vaccination Status", options=['Fully Vaccinated', 'Partially Vaccinated', 'Not Vaccinated'])
+                submit_patient_button = st.form_submit_button(label='Add Record')
 
-    # ---------------------- TAB 3: COMBINED ----------------------
-    with tab3:
-        st.header("📊 Combined Analysis")
-        if not df_patients.empty:
-            chart = alt.Chart(df_patients).mark_bar().encode(
-                x="location:N", y="count():Q", tooltip=["location", "count()"]
-            ).properties(title="Patient Distribution by District")
-            st.altair_chart(chart, use_container_width=True)
-        else:
-            st.info("Not enough data for combined view.")
+                if submit_patient_button:
+                    if not all([new_patient_id, new_name, new_date]):
+                        st.warning("Please fill out Patient ID, Name, and Date.")
+                    else:
+                        try:
+                            patient_doc_ref = db.collection('patients').doc(new_patient_id)
+                            patient_doc = patient_doc_ref.get()
 
-    # ---------------------- TAB 4: ADD RECORDS ----------------------
-    with tab4:
-        st.header("➕ Add New Records")
+                            visit_data = {
+                                'visitDate': new_date,
+                                'symptoms': new_symptoms,
+                                'location': new_district,
+                                'notes': new_notes,
+                                'recordedAt': firestore.SERVER_TIMESTAMP,
+                                'vaccinationStatus': new_vaccination_status
+                            }
+                            
+                            if not patient_doc.exists:
+                                patient_data = {
+                                    'name': new_name,
+                                    'createdAt': firestore.SERVER_TIMESTAMP,
+                                }
+                                patient_doc_ref.set(patient_data)
 
-        if db:
-            st.subheader("Add New Patient")
-            with st.form("add_patient_form"):
-                pid = st.text_input("Patient ID (e.g., KL-001)")
-                name = st.text_input("Patient Name")
-                date = st.text_input("Visit Date (dd-mm-yyyy)")
-                symptoms = st.text_area("Symptoms")
-                location = st.text_input("District")
-                vaccination = st.selectbox("Vaccination Status", ["Fully Vaccinated", "Partially Vaccinated", "Not Vaccinated"])
-                submit = st.form_submit_button("Add Patient Record")
+                            patient_doc_ref.collection('visits').add(visit_data)
+                            patient_doc_ref.update({'currentVaccinationStatus': new_vaccination_status})
 
-                if submit and pid:
-                    try:
-                        patient_ref = db.collection("patients").document(pid)
-                        patient_ref.set({"name": name, "currentVaccinationStatus": vaccination}, merge=True)
-                        patient_ref.collection("visits").add({
-                            "visitDate": date, "symptoms": symptoms, "location": location,
-                            "createdAt": firestore.SERVER_TIMESTAMP
-                        })
-                        st.success(f"Patient {pid} record added.")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error adding patient: {e}")
-
-            st.subheader("Add New Doctor")
-            with st.form("add_doctor_form"):
-                name = st.text_input("Doctor Name")
-                specialty = st.text_input("Specialty")
-                location = st.text_input("Location")
-                phone = st.text_input("Phone Number")
-                email = st.text_input("Email")
-                submit_doc = st.form_submit_button("Add Doctor Record")
-
-                if submit_doc:
-                    try:
-                        db.collection("doctors").add({
-                            "Name": name, "Specialty": specialty, "Location": location,
-                            "Phone": phone, "Email": email, "CreatedAt": firestore.SERVER_TIMESTAMP
-                        })
-                        st.success("Doctor record added.")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error adding doctor: {e}")
+                            st.success(f"Record for {new_patient_id} added!")
+                            st.cache_data.clear()
+                        except Exception as e:
+                            st.error(f"Error adding record: {e}")
