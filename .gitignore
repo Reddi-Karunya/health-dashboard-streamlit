@@ -1,1 +1,16 @@
-firebase_key.json
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.venv/
+.idea/
+.vscode/
+
+# Streamlit
+.streamlit/
+
+# Firebase credentials
+firebase-key.json
