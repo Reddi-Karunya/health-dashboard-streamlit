@@ -12,10 +12,7 @@ from firebase_admin import credentials, firestore
 st.set_page_config(layout="wide", page_title="Kerala Migrant Health Dashboard")
 
 # --- Firebase Connection ---
-# CORRECTED: This function is updated to use Streamlit's secrets for deployment.
-@st.cache_resource
-# --- Firebase Connection ---
-# CORRECTED: This version explicitly passes the project ID to fix the error.
+# CORRECTED: This is the clean, single version of the function.
 @st.cache_resource
 def initialize_firebase():
     if not firebase_admin._apps:
@@ -25,12 +22,10 @@ def initialize_firebase():
                 st.info("Initializing Firebase using Streamlit secrets...")
                 cred_dict = st.secrets["firebase_key"]
                 cred = credentials.Certificate(cred_dict)
-                
                 # Explicitly pass the project ID from the secrets
                 firebase_admin.initialize_app(cred, {
                     'projectId': cred_dict['project_id'],
                 })
-
             else:
                 # Fallback for local development (using environment variable)
                 st.info("Initializing Firebase using local credentials...")
@@ -38,12 +33,6 @@ def initialize_firebase():
                 firebase_admin.initialize_app(cred)
             
             return firestore.client()
-            
-        except Exception as e:
-            st.error(f"Failed to initialize Firebase: {e}", icon="🔥")
-            return None
-            
-    return fire.client()
             
         except Exception as e:
             st.error(f"Failed to initialize Firebase: {e}", icon="🔥")
@@ -164,7 +153,6 @@ else:
                         st.warning("Please fill out Patient ID, Name, and Date.")
                     else:
                         try:
-                            # CORRECTED: Changed .document() to .doc()
                             patient_doc_ref = db.collection('patients').doc(new_patient_id)
                             patient_doc = patient_doc_ref.get()
 
