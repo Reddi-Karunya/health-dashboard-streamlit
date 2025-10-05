@@ -12,7 +12,7 @@ from firebase_admin import credentials, firestore
 st.set_page_config(layout="wide", page_title="Kerala Migrant Health Dashboard")
 
 # --- Firebase Connection ---
-# CORRECTED: This is the clean, single version of the function.
+# FINAL CORRECTED VERSION: This function explicitly passes the project ID.
 @st.cache_resource
 def initialize_firebase():
     if not firebase_admin._apps:
@@ -22,7 +22,8 @@ def initialize_firebase():
                 st.info("Initializing Firebase using Streamlit secrets...")
                 cred_dict = st.secrets["firebase_key"]
                 cred = credentials.Certificate(cred_dict)
-                # Explicitly pass the project ID from the secrets
+                
+                # Explicitly pass the project ID from the secrets to fix the error
                 firebase_admin.initialize_app(cred, {
                     'projectId': cred_dict['project_id'],
                 })
