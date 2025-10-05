@@ -47,11 +47,7 @@ def initialize_firebase():
     return firestore.client()
 
             
-        except Exception as e:
-            st.error(f"Failed to initialize Firebase: {e}", icon="🔥")
-            return None
-            
-    return firestore.client()
+        
 
 # --- Data Fetching Function ---
 @st.cache_data(ttl=60)
