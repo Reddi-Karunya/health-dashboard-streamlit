@@ -13,37 +13,22 @@ from firebase_admin import credentials, firestore
 st.set_page_config(layout="wide", page_title="Kerala Migrant Health Dashboard")
 
 # --- Firebase Connection ---
-# FINAL, ROBUST VERSION: Handles secrets, project ID, and string parsing.
 @st.cache_resource
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
-            # For deployed app on Streamlit Cloud
             if "firebase_key" in st.secrets:
-                cred_info = st.secrets["firebase_key"]
-                cred_dict = {}
-
-                if isinstance(cred_info, str):
-                    cred_dict = ast.literal_eval(cred_info)
-                else:
-                    cred_dict = dict(cred_info)
-
+                cred_dict = ast.literal_eval(st.secrets["firebase_key"]) if isinstance(st.secrets["firebase_key"], str) else dict(st.secrets["firebase_key"])
                 cred = credentials.Certificate(cred_dict)
-                firebase_admin.initialize_app(cred, {
-                    'projectId': cred_dict['project_id'],
-                })
-            # For local development
+                firebase_admin.initialize_app(cred, {'projectId': cred_dict['project_id']})
             else:
                 st.info("Initializing Firebase using local credentials...")
                 cred = credentials.ApplicationDefault()
                 firebase_admin.initialize_app(cred)
-            
             return firestore.client()
-            
         except Exception as e:
             st.error(f"Failed to initialize Firebase: {e}", icon="🔥")
             return None
-            
     return firestore.client()
 
 # --- Data Fetching Function ---
@@ -51,12 +36,10 @@ def initialize_firebase():
 def get_firestore_data(_db):
     if _db is None:
         return pd.DataFrame(), pd.DataFrame()
-
+    # ... (rest of the data fetching function is the same)
     patients_with_visits_data = []
     doctors_data = []
-
     try:
-        # Fetch Patients and Visits Data
         patients_ref = _db.collection('patients')
         for patient_doc in patients_ref.stream():
             patient_data = patient_doc.to_dict()
@@ -67,16 +50,12 @@ def get_firestore_data(_db):
                 combined_record = {**patient_data, **visit_data, 'patient_id': patient_id, 'visit_id': visit_doc.id}
                 patients_with_visits_data.append(combined_record)
         df_patients = pd.DataFrame(patients_with_visits_data)
-
-        # Fetch Doctors Data
         doctors_ref = _db.collection('doctors')
         for doc in doctors_ref.stream():
             record = doc.to_dict()
             record['doctor_id'] = doc.id
             doctors_data.append(record)
         df_doctors = pd.DataFrame(doctors_data)
-
-        # --- Data Cleaning and Formatting ---
         if not df_patients.empty:
             df_patients = df_patients.rename(columns={
                 'name': 'Patient Name', 'location': 'Current Residence (District)',
@@ -84,12 +63,8 @@ def get_firestore_data(_db):
                 'symptoms': 'Reported Symptoms', 'currentVaccinationStatus': 'Vaccination Status',
             })
             df_patients['Date of Visit'] = pd.to_datetime(df_patients['Date of Visit'], format='%d-%m-%Y', errors='coerce')
-
         if not df_doctors.empty:
-            df_doctors = df_doctors.rename(columns={
-                'Name': 'Doctor Name', 'Location': 'Doctor Location', 'Specialty': 'Specialty'
-            })
-
+            df_doctors = df_doctors.rename(columns={'Name': 'Doctor Name', 'Location': 'Doctor Location', 'Specialty': 'Specialty'})
         return df_patients, df_doctors
     except Exception as e:
         st.error(f"Error fetching data from Firestore: {e}")
@@ -117,6 +92,13 @@ else:
     # --- Main Dashboard ---
     db = initialize_firebase()
 
+    # FIX: Define the list of districts here so it's available to the rest of the app
+    _keralaDistricts = [
+        'Alappuzha', 'Ernakulam', 'Idukki', 'Kannur', 'Kasaragod', 'Kollam',
+        'Kottayam', 'Kozhikode', 'Malappuram', 'Palakkad', 'Pathanamthitta',
+        'Thiruvananthapuram', 'Thrissur', 'Wayanad'
+    ]
+
     if db:
         with st.spinner('Loading dashboard data...'):
             df_patients, df_doctors = get_firestore_data(db)
@@ -131,10 +113,11 @@ else:
             
         st.sidebar.header("Patient Data Filters")
         if not df_patients.empty:
+            unique_districts = sorted(df_patients['Current Residence (District)'].unique())
             selected_residence = st.sidebar.multiselect(
                 "Filter by Patient District",
-                options=sorted(df_patients['Current Residence (District)'].unique()),
-                default=sorted(df_patients['Current Residence (District)'].unique())
+                options=unique_districts,
+                default=unique_districts
             )
             df_patients = df_patients[df_patients['Current Residence (District)'].isin(selected_residence)]
         else:
@@ -145,7 +128,7 @@ else:
         
         tab1, tab2, tab3, tab4 = st.tabs(["Patients Overview", "Doctors Overview", "Combined Analysis", "Add Records"])
 
-        with tab1: # All Patient Features Restored
+        with tab1:
             st.header("Migrant Patient Demographics & Visits")
             if not df_patients.empty:
                 col1, col2, col3, col4 = st.columns(4)
@@ -153,7 +136,7 @@ else:
                 col2.metric("Total Visits", len(df_patients))
                 col3.metric("Patient Districts", df_patients['Current Residence (District)'].nunique())
                 col4.metric("Vaccination Statuses", df_patients['Vaccination Status'].nunique())
-
+                
                 st.subheader("Reported Symptoms by District")
                 symptoms_by_district = df_patients.groupby('Current Residence (District)')['Reported Symptoms'].count().reset_index()
                 symptoms_by_district.columns = ['District', 'Number of Reported Symptoms']
@@ -177,7 +160,7 @@ else:
             else:
                 st.info("No patient data to display.")
 
-        with tab2: # All Doctor Features Restored
+        with tab2:
             st.header("Doctor Demographics")
             if not df_doctors.empty:
                 col1, col2 = st.columns(2)
@@ -188,7 +171,7 @@ else:
             else:
                 st.info("No doctor data to display.")
 
-        with tab3: # All Combined Features Restored
+        with tab3:
             st.header("Combined Analysis")
             if not df_patients.empty:
                 st.subheader("Patient Density by District")
@@ -203,7 +186,7 @@ else:
             else:
                 st.info("No patient data for combined analysis.")
 
-        with tab4: # All "Add Records" Features Restored and Fixed
+        with tab4:
             st.header("Add New Records")
             st.subheader("➕ Add New Patient Record")
             with st.form(key='new_patient_form', clear_on_submit=True):
@@ -221,15 +204,11 @@ else:
                         st.warning("Patient ID and Date of Visit are required.")
                     else:
                         try:
-                            # BUG FIX: Using .doc() instead of .document()
                             patient_doc_ref = db.collection('patients').doc(new_patient_id)
                             patient_doc = patient_doc_ref.get()
-
                             visit_data = {'visitDate': new_date, 'symptoms': new_symptoms, 'location': new_district, 'notes': new_notes, 'recordedAt': firestore.SERVER_TIMESTAMP}
-                            
                             if not patient_doc.exists:
                                 patient_doc_ref.set({'name': new_name, 'createdAt': firestore.SERVER_TIMESTAMP})
-                            
                             patient_doc_ref.collection('visits').add(visit_data)
                             patient_doc_ref.update({'currentVaccinationStatus': new_vaccination_status})
                             st.success(f"Record for {new_patient_id} added!")
@@ -250,6 +229,5 @@ else:
                         st.cache_data.clear()
                     except Exception as e:
                         st.error(f"Error adding doctor: {e}")
-
     else:
         st.error("Could not connect to Firebase. Please check your credentials and network connection.")
